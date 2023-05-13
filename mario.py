@@ -15,32 +15,6 @@ from tqdm import tqdm
 import pickle 
 import collections 
 
-class SkipFrames(gym.Wrapper):
-    def __init__(self, env=None, skip=4):
-        super(SkipFrames, self).__init__(env)
-        self._obs_buffer = collections.deque(maxlen=2)
-        self._skip = skip
-
-    def step(self, action):
-        total_reward = 0.0
-        done = None
-        for _ in range(self._skip):
-            obs, reward, done, info = self.env.step(action)
-            self._obs_buffer.append(obs)
-            total_reward += reward
-            if done:
-                break
-        max_frame = np.max(np.stack(self._obs_buffer), axis=0)
-        return max_frame, total_reward, done, info
-
-    def reset(self):
-        """Clear past frame buffer and init to first obs"""
-        self._obs_buffer.clear()
-        obs = self.env.reset()
-        self._obs_buffer.append(obs)
-        return obs
-
-
 class Rescale(gym.ObservationWrapper):
     def __init__(self, env=None):
         super(Rescale, self).__init__(env)
@@ -71,42 +45,18 @@ class ConvertToPyTorch(gym.ObservationWrapper):
     def observation(self, observation):
         return np.moveaxis(observation, 2, 0)
 
-    
-class BufferFrames(gym.ObservationWrapper):
-    def __init__(self, env, n_steps, dtype=np.float32):
-        super(BufferFrames, self).__init__(env)
-        self.dtype = dtype
-        old_space = env.observation_space
-        self.observation_space = gym.spaces.Box(old_space.low.repeat(n_steps, axis=0),
-                                                old_space.high.repeat(n_steps, axis=0), dtype=dtype)
-
-    def reset(self):
-        self.buffer = np.zeros_like(self.observation_space.low, dtype=self.dtype)
-        return self.observation(self.env.reset())
-
-    def observation(self, observation):
-        self.buffer[:-1] = self.buffer[1:]
-        self.buffer[-1] = observation
-        return self.buffer
-
-
 class NormalizePixels(gym.ObservationWrapper):
     def observation(self, obs):
         return np.array(obs).astype(np.float32) / 255.0
 
 
 def create_mario_env(env):
-    env = SkipFrames(env)
     env = Rescale(env)
     env = ConvertToPyTorch(env)
-    env = BufferFrames(env, 4)
     env = NormalizePixels(env)
     return JoypadSpace(env, SIMPLE_MOVEMENT)
   
 class DQNSolver(nn.Module):
-    """
-    Convolutional Neural Net with 3 conv layers and two linear layers
-    """
     def __init__(self, input_shape, n_actions):
         super(DQNSolver, self).__init__()
         self.conv = nn.Sequential(
@@ -139,7 +89,6 @@ class DQNAgent:
     def __init__(self, state_space, action_space, max_memory_size, batch_size, gamma, lr,
                  dropout, exploration_max, exploration_min, exploration_decay, pretrained):
 
-        # Define DQN Layers
         self.state_space = state_space
         self.action_space = action_space
         self.pretrained = pretrained
@@ -156,7 +105,6 @@ class DQNAgent:
         self.copy = 5000
         self.step = 0
 
-        # Create memory
         self.max_memory_size = max_memory_size
         if self.pretrained:
             self.STATE_MEM = torch.load("STATE_MEM.pt")
